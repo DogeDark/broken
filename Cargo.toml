@@ -2,3 +2,10 @@
 resolver = "2"
 members = ["model", "server", "web"]
 exclude = ["server/template"]
+
+[workspace.dependencies]
+model = { path = "./model" }
+gloo-net = { version = "0.5.0" }
+serde = "1.0.203"
+serde_json = "1.0.120"
+uuid = { version = "1.9.1", features = ["serde"] }

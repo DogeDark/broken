@@ -19,10 +19,14 @@ async fn handle_socket(state: AppState, socket: WebSocket) {
 
     // Store common errors
     let failed_to_parse =
-        SocketMessage::SystemError("failed to parse received data".to_string()).to_string();
+        SocketMessage::CompileFinished(Err("failed to parse received data".to_string()))
+            .as_json_string()
+            .unwrap();
 
     let failed_to_compile =
-        SocketMessage::SystemError("failed to compile code".to_string()).to_string();
+        SocketMessage::CompileFinished(Err("failed to compile code".to_string()))
+            .as_json_string()
+            .unwrap();
 
     while let Some(Ok(msg)) = rx.next().await {
         // Get websocket message and try converting to text.
@@ -51,7 +55,11 @@ async fn handle_socket(state: AppState, socket: WebSocket) {
             if state.build_queue_tx.send((res_tx, code)).is_ok() {
                 while let Some(msg) = res_rx.recv().await {
                     let as_socket_msg: SocketMessage = msg.into();
-                    tx.send(as_socket_msg.to_string().into()).await.ok();
+
+                    match as_socket_msg.as_json_string() {
+                        Ok(s) => tx.send(s.into()).await.ok(),
+                        Err(_) => tx.send(failed_to_compile.clone().into()).await.ok(),
+                    };
                 }
             } else {
                 tx.send(failed_to_compile.clone().into()).await.ok();
@@ -74,9 +82,8 @@ impl From<BuildMessage> for SocketMessage {
     fn from(value: BuildMessage) -> Self {
         match value {
             BuildMessage::Message(msg) => SocketMessage::CompileMessage(msg),
-            BuildMessage::Finished(id) => SocketMessage::CompileFinished(id.to_string()),
-            BuildMessage::BuildError(e) => SocketMessage::SystemError(e),
-            BuildMessage::FinishedWithError => SocketMessage::CompileFinishedWithError,
+            BuildMessage::Finished(id) => SocketMessage::CompileFinished(Ok(id)),
+            BuildMessage::Error(e) => SocketMessage::CompileFinished(Err(e)),
         }
     }
 }

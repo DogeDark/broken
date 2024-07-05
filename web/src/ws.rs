@@ -18,7 +18,7 @@ impl Socket {
 
     pub async fn compile(&mut self, code: String) -> Result<(), AppError> {
         self.socket
-            .send(SocketMessage::CompileRequest(code).into())
+            .send(SocketMessage::CompileRequest(code).try_into()?)
             .await
             .map_err(|e| AppError::Socket(e.to_string()))
     }
@@ -42,36 +42,24 @@ pub fn handle_message(
     msg: SocketMessage,
 ) -> bool {
     match msg {
-        SocketMessage::CompileFinished(id) => {
-            is_compiling.set(false);
-            built_page_id.set(Some(id));
+        SocketMessage::CompileFinished(res) => {
+            match res {
+                Ok(id) => {
+                    is_compiling.set(false);
+                    built_page_id.set(Some(id.to_string()))
+                }
+                Err(e) => {
+                    is_compiling.set(false);
+                    built_page_id.set(None);
+                    compiler_messages.push(format!("Error: {e}"));
+                }
+            }
+
             true
         }
         SocketMessage::CompileMessage(msg) => {
             compiler_messages.push(msg);
             false
-        }
-        // TODO: Handle banned words on both client and server
-        // This would avoid unnescessary requests.
-        SocketMessage::BannedWord(word) => {
-            compiler_messages.push("Error:".to_string());
-            compiler_messages.push(format!("A banned word was used: {word}"));
-            compiler_messages
-                .push("Please remove any instances of that word and run again.".to_string());
-            compiler_messages.push("Using that word inside of another word is not allowed either. e.g. `move` in `remove`".to_string());
-            is_compiling.set(false);
-            built_page_id.set(None);
-            true
-        }
-        SocketMessage::CompileFinishedWithError => {
-            is_compiling.set(false);
-            true
-        }
-        SocketMessage::SystemError(s) => {
-            is_compiling.set(false);
-            built_page_id.set(None);
-            compiler_messages.push(format!("Server Error: {s}"));
-            true
         }
         _ => false,
     }

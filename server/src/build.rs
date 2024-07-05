@@ -1,5 +1,5 @@
 use crate::REMOVAL_DELAY;
-use dioxus_logger::tracing::error;
+use dioxus_logger::tracing::{error, warn};
 use fs_extra::{dir, file};
 use std::{
     path::PathBuf,
@@ -26,8 +26,7 @@ pub type QueueType = (UnboundedSender<BuildMessage>, String);
 pub enum BuildMessage {
     Message(String),
     Finished(Uuid),
-    FinishedWithError,
-    BuildError(String),
+    Error(String),
 }
 
 pub async fn start_build_watcher(
@@ -76,7 +75,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
         let new_path = &snippets_to_copy[i];
         if let Err(e) = fs_extra::file::copy(path, new_path, &options) {
             error!(?path, ?new_path, error = ?e, "failed to copy snippets to destination path");
-            tx.send(BuildMessage::BuildError(
+            tx.send(BuildMessage::Error(
                 "Server failed to copy snippets.".to_string(),
             ))
             .ok();
@@ -91,7 +90,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
             Ok(text) => text,
             Err(e) => {
                 error!(?path, error = ?e, "failed to read snippet");
-                tx.send(BuildMessage::BuildError(
+                tx.send(BuildMessage::Error(
                     "Server failed to read snippet.".to_string(),
                 ))
                 .ok();
@@ -106,7 +105,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
 
         if let Err(e) = fs::write(&path, &text).await {
             error!(?path, ?text, error = ?e, "failed to write snippet to new destination");
-            tx.send(BuildMessage::BuildError(
+            tx.send(BuildMessage::Error(
                 "Server failed to write snippet to new destination.".to_string(),
             ))
             .ok();
@@ -128,7 +127,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
         Ok(c) => c,
         Err(e) => {
             error!(?template, error = ?e, "dx build failed to execute");
-            tx.send(BuildMessage::BuildError(
+            tx.send(BuildMessage::Error(
                 "Server failed to build project.".to_string(),
             ))
             .ok();
@@ -141,7 +140,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
         Some(out) => out,
         None => {
             error!("failed to take stdout from command");
-            tx.send(BuildMessage::BuildError(
+            tx.send(BuildMessage::Error(
                 "Server failed to build project.".to_string(),
             ))
             .ok();
@@ -153,7 +152,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
         Some(out) => out,
         None => {
             error!("failed to take stderr from command");
-            tx.send(BuildMessage::BuildError(
+            tx.send(BuildMessage::Error(
                 "Server failed to build project.".to_string(),
             ))
             .ok();
@@ -174,7 +173,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
                     },
                     Err(e) => {
                         error!(error = ?e, "error reading stdout");
-                        tx.send(BuildMessage::BuildError(
+                        tx.send(BuildMessage::Error(
                             "Server failed to build project.".to_string(),
                         ))
                         .ok();
@@ -190,7 +189,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
                     },
                     Err(e) => {
                         error!(error = ?e, "error reading stderr");
-                        tx.send(BuildMessage::BuildError(
+                        tx.send(BuildMessage::Error(
                             "Server failed to build project.".to_string(),
                         ))
                         .ok();
@@ -206,7 +205,8 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
     }
 
     if !dist.exists() {
-        tx.send(BuildMessage::FinishedWithError).ok();
+        tx.send(BuildMessage::Error("failed to compile".to_string())).ok();
+        warn!(dist_path = ?dist, "dist output does not exist");
         return;
     }
 
@@ -215,7 +215,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
     let new_dist = template.join(id.to_string());
     if let Err(e) = fs::rename(&dist, &new_dist).await {
         error!(from = ?dist, to = ?new_dist, error = ?e, "failed to rename built project");
-        tx.send(BuildMessage::BuildError(
+        tx.send(BuildMessage::Error(
             "Server failed to finalize built project.".to_string(),
         ))
         .ok();
@@ -227,7 +227,7 @@ async fn build(build_template_path: &str, tx: UnboundedSender<BuildMessage>, cod
     // Copy build and named project to temp directory to serve.
     if let Err(e) = fs_extra::dir::move_dir(&new_dist, &temp_path, &options) {
         error!(from = ?new_dist, to = ?temp_path, error = ?e, "failed to copy built project to new location");
-        tx.send(BuildMessage::BuildError(
+        tx.send(BuildMessage::Error(
             "Server failed to finalize built project.".to_string(),
         ))
         .ok();
